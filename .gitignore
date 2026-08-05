@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Large ML model files (use download_model.py to download)
+*.dat
+*.bz2
+vision-backend/shape_predictor_68_face_landmarks.dat
+
+# Environment variables
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Build outputs
+dist/
+**/dist/
+dist-ssr/
+.output/
+.vinxi/
+.nitro/
+
+# Cache and temporary files
+.tanstack/
+**/.tanstack/
+*.local
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
