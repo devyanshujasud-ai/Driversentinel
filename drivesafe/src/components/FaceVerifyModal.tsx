@@ -36,6 +36,7 @@ const AUTO_CLOSE_DELAY = 2000;
 export function FaceVerifyModal() {
   const { data: pending } = useFirebaseValue<PendingNode>("pending");
   const [open, setOpen] = useState(false);
+  const [driverName, setDriverName] = useState<string>("");
   const [state, setState] = useState<ModalState | null>(null);
   const camRef = useRef<Webcam | null>(null);
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ export function FaceVerifyModal() {
   useEffect(() => {
     if (!firebaseConfigured) return;
     if (pending && pending.driver) {
+      setDriverName(pending.driver);
       setOpen(true);
       setState((prev) => {
         if (!prev) {
@@ -203,7 +205,7 @@ export function FaceVerifyModal() {
                   Face Verification Required
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Driver: <span className="font-semibold text-foreground">{pending.driver}</span>
+                  Driver: <span className="font-semibold text-foreground">{driverName || pending?.driver || "Driver"}</span>
                 </p>
               </div>
             </div>
