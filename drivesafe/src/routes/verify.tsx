@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, Loader2, ScanFace, XCircle, ShieldCheck, ShieldAlert, CreditCard } from "lucide-react";
 import { CameraPanel } from "@/components/CameraPanel";
@@ -34,6 +34,16 @@ function VerifyPage() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
   const [showMLModal, setShowMLModal] = useState(false);
+
+  // Directly open Drowsiness ML Model window 2 seconds after successful verification
+  useEffect(() => {
+    if (state.kind === "success") {
+      const timer = setTimeout(() => {
+        setShowMLModal(true);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [state]);
 
   const registerCapture = useCallback((fn: () => string | null) => {
     captureRef.current = fn;

@@ -31,7 +31,7 @@ type ModalState =
   | { kind: "failure"; message: string };
 
 const COUNTDOWN_SECONDS = 3;
-const AUTO_OPEN_ML_DELAY = 2200;
+const AUTO_OPEN_ML_DELAY = 2000; // Exactly 2 seconds after verification
 
 export function FaceVerifyModal() {
   const { data: pending } = useFirebaseValue<PendingNode>("pending");
