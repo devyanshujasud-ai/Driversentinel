@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import Webcam from "react-webcam";
 import {
   Camera,
@@ -14,7 +15,6 @@ import { postImage } from "@/lib/backend";
 import { useFirebaseValue } from "@/lib/firebase";
 import { firebaseConfigured } from "@/lib/env";
 import { cn } from "@/lib/utils";
-import { DrowsinessMLModal } from "./DrowsinessMLModal";
 
 type PendingNode = {
   driver?: string;
@@ -31,15 +31,14 @@ type ModalState =
   | { kind: "failure"; message: string };
 
 const COUNTDOWN_SECONDS = 3;
-const AUTO_OPEN_ML_DELAY = 2000; // Exactly 2 seconds after verification
+const AUTO_CLOSE_DELAY = 2000;
 
 export function FaceVerifyModal() {
   const { data: pending } = useFirebaseValue<PendingNode>("pending");
   const [open, setOpen] = useState(false);
-  const [showDrowsinessModal, setShowDrowsinessModal] = useState(false);
-  const [verifiedDriverName, setVerifiedDriverName] = useState("");
   const [state, setState] = useState<ModalState | null>(null);
   const camRef = useRef<Webcam | null>(null);
+  const navigate = useNavigate();
 
   // Open modal when Firebase /pending node appears
   useEffect(() => {
@@ -103,17 +102,17 @@ export function FaceVerifyModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  // After face is verified, transition directly to Drowsiness ML Model pop-up
+  // Auto-close and redirect to dashboard after success
   useEffect(() => {
     if (state?.kind === "success") {
       const timer = setTimeout(() => {
         setOpen(false);
         setState(null);
-        setShowDrowsinessModal(true);
-      }, AUTO_OPEN_ML_DELAY);
+        navigate({ to: "/dashboard" });
+      }, AUTO_CLOSE_DELAY);
       return () => clearTimeout(timer);
     }
-  }, [state]);
+  }, [state, navigate]);
 
   const doCapture = useCallback(async () => {
     const shot = camRef.current?.getScreenshot() ?? null;
@@ -169,11 +168,8 @@ export function FaceVerifyModal() {
     setState(null);
   }, []);
 
-  if (!open || !pending?.driver) return (
-    <>
-      {showDrowsinessModal && <DrowsinessMLModal driverName={verifiedDriverName} onClose={() => setShowDrowsinessModal(false)} />}
-    </>
-  );
+  if (!open || !pending?.driver) return null;
+
 
   const showCamera = state?.kind === "waiting" || state?.kind === "countdown" || state?.kind === "verifying";
 
@@ -299,12 +295,20 @@ export function FaceVerifyModal() {
                   </div>
                 )}
 
-                <div className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm">
-                  <ShieldCheck className="size-5 text-emerald-400" />
-                  <span className="font-semibold text-emerald-300">
-                    Launching Drowsiness ML Model…
-                  </span>
-                </div>
+                {state.esp32Unlocked && (
+                  <div className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm">
+                    <ShieldCheck className="size-5 text-emerald-400" />
+                    <span className="font-semibold text-emerald-300">
+                      Session Activated! Redirecting…
+                    </span>
+                  </div>
+                )}
+
+                {!state.esp32Unlocked && (
+                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
+                    {state.esp32Error || "Session activated — loading dashboard…"}
+                  </div>
+                )}
               </div>
             )}
 
@@ -332,13 +336,6 @@ export function FaceVerifyModal() {
           </div>
         </div>
       </div>
-      {showDrowsinessModal && (
-        <DrowsinessMLModal
-          open={showDrowsinessModal}
-          driverName={verifiedDriverName}
-          onClose={() => setShowDrowsinessModal(false)}
-        />
-      )}
     </div>
   );
 }
