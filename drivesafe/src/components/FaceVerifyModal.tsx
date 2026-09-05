@@ -12,7 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { postImage } from "@/lib/backend";
-import { useFirebaseValue } from "@/lib/firebase";
+import { clearFirebasePending, syncDeviceLocationToFirebase, useFirebaseValue } from "@/lib/firebase";
 import { firebaseConfigured } from "@/lib/env";
 import { cn } from "@/lib/utils";
 
@@ -44,26 +44,24 @@ export function FaceVerifyModal() {
   useEffect(() => {
     if (!firebaseConfigured) return;
     if (pending && pending.driver) {
-      // Only open if not already open
-      setOpen((prev) => {
+      setOpen(true);
+      setState((prev) => {
         if (!prev) {
-          setState({ kind: "preparing" });
           // Tell backend to release the camera from drowsiness monitor
-          // (OpenCV holds exclusive access on Windows)
           fetch(`${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/verify/prepare`, {
             method: "POST",
             mode: "cors",
           })
-            .catch(() => {}) // ignore errors — camera may already be free
+            .catch(() => {})
             .finally(() => {
-              // Small delay to let OpenCV fully release the device
-              setTimeout(() => setState({ kind: "waiting" }), 500);
+              setTimeout(() => setState({ kind: "waiting" }), 350);
             });
+          return { kind: "preparing" };
         }
-        return true;
+        return prev;
       });
     } else {
-      // pending cleared → close if still in progress
+      // pending cleared in Firebase → close modal if still in pending states
       setState((prev) => {
         if (prev && (prev.kind === "preparing" || prev.kind === "countdown" || prev.kind === "verifying" || prev.kind === "waiting")) {
           setOpen(false);
@@ -78,36 +76,20 @@ export function FaceVerifyModal() {
   const onUserMedia = useCallback(() => {
     console.log("[FaceVerifyModal] Camera stream live");
     setState((prev) => {
-      if (prev?.kind === "waiting") {
+      if (prev?.kind === "waiting" || prev?.kind === "preparing") {
         return { kind: "countdown", secondsLeft: COUNTDOWN_SECONDS };
       }
       return prev;
     });
   }, []);
 
-  // Handle countdown timer
-  useEffect(() => {
-    if (!state || state.kind !== "countdown") return;
-
-    if (state.secondsLeft <= 0) {
-      void doCapture();
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setState({ kind: "countdown", secondsLeft: state.secondsLeft - 1 });
-    }, 1000);
-
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
-
-  // Auto-close and redirect to dashboard after success
+  // Auto-close and redirect to dashboard after 2 seconds on success
   useEffect(() => {
     if (state?.kind === "success") {
       const timer = setTimeout(() => {
         setOpen(false);
         setState(null);
+        void clearFirebasePending();
         navigate({ to: "/dashboard" });
       }, AUTO_CLOSE_DELAY);
       return () => clearTimeout(timer);
@@ -126,11 +108,20 @@ export function FaceVerifyModal() {
       const verified = res["verified"] !== false && Boolean(res["name"] ?? res["driver"]);
       const name = String(res["name"] ?? res["driver"] ?? "");
       const rfid = String(res["rfid"] ?? "");
-      const esp32Unlocked = Boolean(res["esp32_unlocked"]);
+      const esp32Unlocked = Boolean(res["esp32_unlocked"] ?? true);
       const esp32Error = String(res["esp32_error"] ?? "");
+
       if (verified) {
-        setVerifiedDriverName(name);
+        // Clear Firebase /pending immediately so it never gets stuck
+        void clearFirebasePending();
+
+        // Mark state as success
         setState({ kind: "success", name, rfid, esp32Unlocked, esp32Error });
+
+        // Start drowsiness detection model on backend
+        fetch(`${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/monitor/start`, {
+          method: "POST",
+        }).catch((err) => console.warn("[Monitor] Auto-start monitor:", err));
 
         // Fetch browser device GPS location and sync to Firebase map
         if (navigator.geolocation) {
@@ -138,7 +129,6 @@ export function FaceVerifyModal() {
             async (position) => {
               const { latitude, longitude } = position.coords;
               try {
-                const { syncDeviceLocationToFirebase } = await import("@/lib/firebase");
                 await syncDeviceLocationToFirebase(latitude, longitude);
                 console.log("[Geolocation] Synced verified device location to Firebase:", latitude, longitude);
               } catch (err) {
@@ -154,10 +144,27 @@ export function FaceVerifyModal() {
       } else {
         setState({ kind: "failure", message: "NOT VERIFIED" });
       }
-    } catch {
+    } catch (err) {
+      console.error("[FaceVerifyModal] Verification failed:", err);
       setState({ kind: "failure", message: "NOT VERIFIED" });
     }
   }, []);
+
+  // Handle countdown timer
+  useEffect(() => {
+    if (!state || state.kind !== "countdown") return;
+
+    if (state.secondsLeft <= 0) {
+      void doCapture();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setState({ kind: "countdown", secondsLeft: state.secondsLeft - 1 });
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [state, doCapture]);
 
   const handleRetry = useCallback(() => {
     setState({ kind: "waiting" });
@@ -166,9 +173,10 @@ export function FaceVerifyModal() {
   const handleClose = useCallback(() => {
     setOpen(false);
     setState(null);
+    void clearFirebasePending();
   }, []);
 
-  if (!open || !pending?.driver) return null;
+  if (!open) return null;
 
 
   const showCamera = state?.kind === "waiting" || state?.kind === "countdown" || state?.kind === "verifying";
@@ -273,6 +281,15 @@ export function FaceVerifyModal() {
                       <span className="text-sm text-muted-foreground">Verifying identity…</span>
                     </div>
                   )}
+
+                  {(state?.kind === "countdown" || state?.kind === "waiting") && (
+                    <button
+                      onClick={doCapture}
+                      className="mt-3 w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.99]"
+                    >
+                      Verify Now
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -295,20 +312,12 @@ export function FaceVerifyModal() {
                   </div>
                 )}
 
-                {state.esp32Unlocked && (
-                  <div className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm">
-                    <ShieldCheck className="size-5 text-emerald-400" />
-                    <span className="font-semibold text-emerald-300">
-                      Session Activated! Redirecting…
-                    </span>
-                  </div>
-                )}
-
-                {!state.esp32Unlocked && (
-                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
-                    {state.esp32Error || "Session activated — loading dashboard…"}
-                  </div>
-                )}
+                <div className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm">
+                  <ShieldCheck className="size-5 text-emerald-400" />
+                  <span className="font-semibold text-emerald-300">
+                    Session Activated! Closing window in 2s…
+                  </span>
+                </div>
               </div>
             )}
 

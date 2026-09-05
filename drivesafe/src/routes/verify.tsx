@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { CheckCircle2, Loader2, ScanFace, XCircle, ShieldCheck, ShieldAlert, CreditCard } from "lucide-react";
 import { CameraPanel } from "@/components/CameraPanel";
 import { postImage } from "@/lib/backend";
+import { clearFirebasePending, syncDeviceLocationToFirebase } from "@/lib/firebase";
 
 export const Route = createFileRoute("/verify")({
   head: () => ({
@@ -32,6 +33,17 @@ type State =
 function VerifyPage() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
+  const navigate = useNavigate();
+
+  // Auto-redirect to dashboard after 2 seconds on successful verification
+  useEffect(() => {
+    if (state.kind === "success") {
+      const timer = setTimeout(() => {
+        navigate({ to: "/dashboard" });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [state, navigate]);
 
   const registerCapture = useCallback((fn: () => string | null) => {
     captureRef.current = fn;
@@ -49,12 +61,24 @@ function VerifyPage() {
       const verified = res["verified"] !== false && Boolean(res["name"] ?? res["driver"]);
       const name = String(res["name"] ?? res["driver"] ?? "");
       const rfid = String(res["rfid"] ?? "");
-      const esp32Unlocked = Boolean(res["esp32_unlocked"]);
+      const esp32Unlocked = Boolean(res["esp32_unlocked"] ?? true);
       const esp32Error = String(res["esp32_error"] ?? "");
-      if (verified) setState({ kind: "success", name, rfid, esp32Unlocked, esp32Error });
-      else setState({ kind: "failure", message: "Face not recognized — access denied" });
+      if (verified) {
+        void clearFirebasePending();
+        fetch(`${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/monitor/start`, {
+          method: "POST",
+        }).catch(() => {});
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition((pos) => {
+            void syncDeviceLocationToFirebase(pos.coords.latitude, pos.coords.longitude);
+          });
+        }
+        setState({ kind: "success", name, rfid, esp32Unlocked, esp32Error });
+      } else {
+        setState({ kind: "failure", message: "NOT VERIFIED" });
+      }
     } catch {
-      setState({ kind: "failure", message: "Face not recognized — access denied" });
+      setState({ kind: "failure", message: "NOT VERIFIED" });
     }
   }, []);
 

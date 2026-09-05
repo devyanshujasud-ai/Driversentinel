@@ -93,3 +93,18 @@ export async function syncDeviceLocationToFirebase(lat: number, lng: number): Pr
   });
 }
 
+/** Clear the pending node in Firebase Realtime Database */
+export async function clearFirebasePending(): Promise<boolean> {
+  try {
+    const db = await getDb();
+    if (!db) return false;
+    const { ref, set } = await import("firebase/database");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await set(ref(db as any, "pending"), null);
+    return true;
+  } catch (err) {
+    console.warn("Failed to clear Firebase pending node:", err);
+    return false;
+  }
+}
+

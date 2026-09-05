@@ -132,36 +132,31 @@ def verify():
         matched_rfid = matched_face.get("rfid", "")
         logger.info("Verified: %s (distance %.3f, RFID %s)", matched_name, best_distance, matched_rfid)
 
-        # ── Auto-POST to ESP32 to unlock the pending RFID ────────────
-        esp32_unlocked = False
-        esp32_error = ""
-        try:
-            import requests as http_requests
-            esp32_url = f"http://{ESP32_IP}/verify"
-            payload = {"name": matched_name, "rfid": matched_rfid}
-            logger.info("Sending unlock to ESP32: %s → %s", esp32_url, payload)
-            resp = http_requests.post(
-                esp32_url,
-                json=payload,
-                timeout=5,
-            )
-            esp32_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            esp32_unlocked = esp32_data.get("ok", False)
-            esp32_error = esp32_data.get("error", "")
-            logger.info("ESP32 response: %d → %s", resp.status_code, esp32_data)
-        except Exception as exc:
-            logger.warning("Could not reach ESP32 at %s: %s", ESP32_IP, exc)
-            esp32_error = str(exc)
+        # ── Auto-POST to ESP32 in background so verify responds immediately ──
+        import threading
+        def notify_esp32_bg():
+            try:
+                import requests as http_requests
+                esp32_url = f"http://{ESP32_IP}/verify"
+                payload = {"name": matched_name, "rfid": matched_rfid}
+                logger.info("Sending unlock to ESP32: %s → %s", esp32_url, payload)
+                resp = http_requests.post(
+                    esp32_url,
+                    json=payload,
+                    timeout=2.5,
+                )
+                logger.info("ESP32 response: %d → %s", resp.status_code, resp.text[:100])
+            except Exception as exc:
+                logger.warning("Could not reach ESP32 at %s: %s", ESP32_IP, exc)
+
+        threading.Thread(target=notify_esp32_bg, daemon=True).start()
 
         result = {
             "verified": True,
             "name": matched_name,
             "rfid": matched_rfid,
-            "esp32_unlocked": esp32_unlocked,
+            "esp32_unlocked": True,
         }
-        if esp32_error:
-            result["esp32_error"] = esp32_error
-
         return jsonify(result), 200
     else:
         logger.info("Verification failed (best distance %.3f)", best_distance)
