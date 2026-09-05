@@ -136,7 +136,8 @@ class DrowsinessMonitor:
             logger.error("Cannot open camera %s", self._camera_index)
             return
 
-        consec_count = 0
+        closed_start_time = None
+        last_alert_time = 0.0
 
         try:
             while not self._stop_event.is_set():
@@ -195,19 +196,27 @@ class DrowsinessMonitor:
                             cv2.circle(frame, (x, y), 2, (255, 255, 255), -1)
 
                         if is_eye_closed:
-                            consec_count += 1
-                            if consec_count >= EAR_CONSEC_FRAMES:
-                                drowsy_now = True
-                                self._is_drowsy = True
-                                logger.warning(
-                                    "Drowsiness detected! EAR=%.3f for %d frames",
-                                    avg_ear,
-                                    consec_count,
-                                )
-                                _notify_esp32(self._esp32_ip)
-                                consec_count = 0
+                            if closed_start_time is None:
+                                closed_start_time = time.time()
+                            closed_duration = time.time() - closed_start_time
+
+                            if closed_duration >= 3.0:
+                                # Trigger alert if not alerted yet or if re-alert interval passed
+                                if (time.time() - last_alert_time) >= 4.0:
+                                    drowsy_now = True
+                                    self._is_drowsy = True
+                                    last_alert_time = time.time()
+                                    logger.warning(
+                                        "Drowsiness detected! Eyes closed for %.2fs (EAR=%.3f)",
+                                        closed_duration,
+                                        avg_ear,
+                                    )
+                                    _notify_esp32(self._esp32_ip)
+                                else:
+                                    drowsy_now = True
+                                    self._is_drowsy = True
                         else:
-                            consec_count = 0
+                            closed_start_time = None
                             self._is_drowsy = False
 
                         # Overlay HUD on frame

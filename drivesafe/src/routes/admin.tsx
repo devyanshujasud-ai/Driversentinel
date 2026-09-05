@@ -1,9 +1,9 @@
-import { useCallback, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { CameraPanel } from "@/components/CameraPanel";
-import { postImage } from "@/lib/backend";
+import { getDrivers, postImage } from "@/lib/backend";
 import { useFirebaseValue } from "@/lib/firebase";
 import { firebaseConfigured } from "@/lib/env";
 
@@ -28,24 +28,63 @@ export const Route = createFileRoute("/admin")({
 
 type DriverNode = { name?: string; rfid?: string; enrolledAt?: number | string };
 
+const DEFAULT_DRIVERS: DriverNode[] = [
+  { name: "Parth", rfid: "B3 3D 02 04", enrolledAt: "2026-09-05T04:21:24.835Z" },
+  { name: "Swanandi", rfid: "CD 3E C8 01", enrolledAt: "2026-09-03T19:12:48.000Z" },
+  { name: "A. Ramírez", rfid: "84 A2 3F 91", enrolledAt: "2026-09-03T19:12:48.000Z" },
+  { name: "S. Patel", rfid: "84 B7 21 E3", enrolledAt: "2026-09-02T19:12:48.000Z" },
+];
+
 function AdminPage() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const [name, setName] = useState("");
   const [rfid, setRfid] = useState("");
   const [shot, setShot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [backendDrivers, setBackendDrivers] = useState<DriverNode[]>([]);
   const [localDrivers, setLocalDrivers] = useState<DriverNode[]>([]);
 
   const { data: remoteDrivers } = useFirebaseValue<Record<string, DriverNode>>("drivers");
+
+  // Fetch verified & enrolled drivers from Python backend database (faces.pkl)
+  const refreshBackendDrivers = useCallback(async () => {
+    try {
+      const list = await getDrivers();
+      if (list && list.length > 0) {
+        setBackendDrivers(list);
+      }
+    } catch {
+      // Backend may be offline or initializing
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBackendDrivers();
+  }, [refreshBackendDrivers]);
 
   const registerCapture = useCallback((fn: () => string | null) => {
     captureRef.current = fn;
   }, []);
 
-  const drivers: DriverNode[] =
-    firebaseConfigured && remoteDrivers
-      ? Object.values(remoteDrivers)
-      : localDrivers;
+  // Merge drivers with precedence: Local added -> Backend faces.pkl -> Firebase -> Defaults
+  const drivers: DriverNode[] = (() => {
+    const map = new Map<string, DriverNode>();
+    for (const d of DEFAULT_DRIVERS) {
+      if (d.name) map.set(d.name.toLowerCase(), d);
+    }
+    if (firebaseConfigured && remoteDrivers) {
+      for (const d of Object.values(remoteDrivers)) {
+        if (d.name) map.set(d.name.toLowerCase(), d);
+      }
+    }
+    for (const d of backendDrivers) {
+      if (d.name) map.set(d.name.toLowerCase(), d);
+    }
+    for (const d of localDrivers) {
+      if (d.name) map.set(d.name.toLowerCase(), d);
+    }
+    return Array.from(map.values());
+  })();
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -66,6 +105,7 @@ function AdminPage() {
         { name: name.trim(), rfid: rfid.trim(), enrolledAt: Date.now() },
         ...prev,
       ]);
+      void refreshBackendDrivers();
       setName("");
       setRfid("");
       setShot(null);

@@ -16,15 +16,18 @@ function CameraFallback() {
 export function CameraPanel({
   registerCapture,
   scanning = true,
+  onReady,
 }: {
   registerCapture: (fn: () => string | null) => void;
   scanning?: boolean;
+  onReady?: () => void;
 }) {
   return (
     <ClientOnly fallback={<CameraFallback />}>
       <Suspense fallback={<CameraFallback />}>
-        <CameraFeed registerCapture={registerCapture} scanning={scanning} />
+        <CameraFeed registerCapture={registerCapture} scanning={scanning} onReady={onReady} />
       </Suspense>
     </ClientOnly>
   );
 }
+

@@ -67,3 +67,29 @@ export function useFirebaseValue<T>(path: string): {
 
   return { data, connected, ready };
 }
+
+/** Update a path in Firebase Realtime Database */
+export async function updateFirebaseValue(path: string, value: Record<string, unknown>): Promise<boolean> {
+  try {
+    const db = await getDb();
+    if (!db) return false;
+    const { ref, update } = await import("firebase/database");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await update(ref(db as any, path), value);
+    return true;
+  } catch (err) {
+    console.warn("Failed to update Firebase Realtime Database path:", path, err);
+    return false;
+  }
+}
+
+/** Sync browser device coordinates to Firebase location */
+export async function syncDeviceLocationToFirebase(lat: number, lng: number): Promise<boolean> {
+  return updateFirebaseValue("status/location", {
+    lat,
+    lng,
+    updated: Date.now(),
+    source: "device_gps",
+  });
+}
+

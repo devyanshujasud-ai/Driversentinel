@@ -121,8 +121,28 @@ function Dashboard() {
     [eventsMap],
   );
 
-  const lat = status.location?.lat ?? 19.076;
-  const lng = status.location?.lng ?? 72.8777;
+  const [deviceLocation, setDeviceLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Fallback: If device coordinates exist in browser or GPS sensor hasn't pushed, use device location
+  useEffect(() => {
+    if (navigator.geolocation && (!status.location || (status.location.lat === 19.076 && status.location.lng === 72.8777))) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setDeviceLocation(coords);
+          // Also sync to Firebase status/location
+          import("@/lib/firebase").then(({ syncDeviceLocationToFirebase }) => {
+            syncDeviceLocationToFirebase(coords.lat, coords.lng);
+          });
+        },
+        (err) => console.warn("Browser geolocation prompt/error:", err.message),
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
+  }, [status.location]);
+
+  const lat = status.location?.lat ?? deviceLocation?.lat ?? 19.076;
+  const lng = status.location?.lng ?? deviceLocation?.lng ?? 72.8777;
   const critical = statusKey === "exceeded" || statusKey === "fraud";
 
   return (

@@ -199,7 +199,7 @@ function Home() {
                 </div>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                Threshold: EAR &lt; 0.25 across 20 consecutive camera frames.
+                Threshold: EAR &lt; 0.25 (eyes closed) continuously for &gt; 3.0 seconds.
               </p>
             </div>
 

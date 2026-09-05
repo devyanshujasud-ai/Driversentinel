@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, Loader2, ScanFace, XCircle, ShieldCheck, ShieldAlert, CreditCard } from "lucide-react";
 import { CameraPanel } from "@/components/CameraPanel";
+import { DrowsinessMLModal } from "@/components/DrowsinessMLModal";
 import { postImage } from "@/lib/backend";
 
 export const Route = createFileRoute("/verify")({
@@ -32,6 +33,7 @@ type State =
 function VerifyPage() {
   const captureRef = useRef<(() => string | null) | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
+  const [showMLModal, setShowMLModal] = useState(false);
 
   const registerCapture = useCallback((fn: () => string | null) => {
     captureRef.current = fn;
@@ -88,7 +90,10 @@ function VerifyPage() {
           {state.kind === "success" && (
             <div className="animate-fade-up rounded-md border border-ok/40 bg-ok/10 p-6 text-center">
               <CheckCircle2 className="mx-auto size-9 text-ok" aria-hidden />
-              <p className="mt-4 text-2xl font-bold tracking-tight">
+              <p className="mt-4 text-xl font-bold tracking-tight text-emerald-400 uppercase">
+                FACE VERIFIED SUCCESFFULLY
+              </p>
+              <p className="mt-1 text-lg font-semibold text-foreground">
                 {state.name || "Driver verified"}
               </p>
 
@@ -122,19 +127,29 @@ function VerifyPage() {
                 </div>
               )}
 
-              <Link
-                to="/dashboard"
-                className="mt-5 inline-flex rounded-md bg-ok px-5 py-2.5 text-sm font-semibold text-ok-foreground transition-opacity hover:opacity-90"
-              >
-                Go to Dashboard
-              </Link>
+              <div className="mt-5 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMLModal(true)}
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow transition-colors hover:bg-primary/90"
+                >
+                  Open Drowsiness ML Monitor
+                </button>
+                <Link
+                  to="/dashboard"
+                  className="inline-flex rounded-md border border-border bg-secondary px-5 py-2.5 text-sm font-semibold text-foreground transition-opacity hover:bg-accent"
+                >
+                  Dashboard
+                </Link>
+              </div>
             </div>
           )}
 
           {state.kind === "failure" && (
             <div className="animate-fade-up rounded-md border border-danger/40 bg-danger/10 p-6 text-center">
               <XCircle className="mx-auto size-9 text-danger" aria-hidden />
-              <p className="mt-4 text-base font-semibold">{state.message}</p>
+              <p className="mt-4 text-xl font-bold tracking-tight text-danger uppercase">NOT VERIFIED</p>
+              <p className="mt-1 text-xs text-muted-foreground">{state.message}</p>
               <button
                 onClick={() => setState({ kind: "idle" })}
                 className="mt-5 rounded-md border border-border bg-secondary px-5 py-2.5 text-sm font-semibold transition-colors hover:bg-accent"
@@ -149,6 +164,14 @@ function VerifyPage() {
       <p className="mt-4 text-center text-xs text-muted-foreground">
         Position your face clearly in frame and ensure good lighting
       </p>
+
+      {showMLModal && (
+        <DrowsinessMLModal
+          open={showMLModal}
+          driverName={state.kind === "success" ? state.name : undefined}
+          onClose={() => setShowMLModal(false)}
+        />
+      )}
     </div>
   );
 }

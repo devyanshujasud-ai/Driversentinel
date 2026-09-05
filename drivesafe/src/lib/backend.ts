@@ -68,3 +68,16 @@ export async function postImage(
   if (!res.ok) throw new Error((payload["error"] as string) ?? `Request failed (${res.status})`);
   return payload;
 }
+
+export async function getDrivers(): Promise<Array<{ name: string; rfid: string; enrolledAt: string | number }>> {
+  if (!backendConfigured) return [];
+  try {
+    const res = await fetch(`${BACKEND_URL}/drivers`, { method: "GET", mode: "cors" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.drivers as Array<{ name: string; rfid: string; enrolledAt: string | number }>) || [];
+  } catch {
+    return [];
+  }
+}
+

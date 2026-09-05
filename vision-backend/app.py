@@ -88,6 +88,14 @@ def verify():
     Success → 200  { "verified": true, "name": "...", "rfid": "...", "esp32_unlocked": bool }
     Failure → 404  { "verified": false, "error": "<reason>" }
     """
+    # ── Release the camera if the drowsiness monitor is using it ─────
+    # On Windows the webcam is exclusive; the browser needs it for the
+    # face-capture, so we must stop OpenCV's hold on the device first.
+    monitor_was_running = monitor.running
+    if monitor_was_running:
+        monitor.stop()
+        logger.info("Monitor paused for face verification (camera released)")
+
     if "image" not in request.files:
         return jsonify({"verified": False, "error": "No image provided"}), 400
 
@@ -213,6 +221,22 @@ def enroll():
     )
 
 
+@app.route("/drivers", methods=["GET"])
+def get_drivers():
+    """Return list of all enrolled drivers from faces.pkl."""
+    faces = _load_faces()
+    drivers_list = [
+        {
+            "name": f.get("name", "Unknown"),
+            "rfid": f.get("rfid", ""),
+            "enrolledAt": f.get("enrolled_at", ""),
+        }
+        for f in faces
+    ]
+    return jsonify({"drivers": drivers_list}), 200
+
+
+
 @app.route("/monitor/start", methods=["POST"])
 def monitor_start():
     """Start the drowsiness-detection background thread."""
@@ -237,6 +261,19 @@ def monitor_stop():
         return jsonify({"monitoring": False, "message": "Drowsiness monitor stopped"}), 200
     else:
         return jsonify({"monitoring": False, "message": "Monitor was not running"}), 200
+
+
+@app.route("/verify/prepare", methods=["POST"])
+def verify_prepare():
+    """
+    Release the camera so the browser can access it for face verification.
+    Called by the frontend before opening the webcam in the auto-popup modal.
+    """
+    was_running = monitor.running
+    if was_running:
+        monitor.stop()
+        logger.info("Camera released for browser face verification")
+    return jsonify({"camera_released": True, "monitor_was_running": was_running}), 200
 
 
 @app.route("/video_feed")

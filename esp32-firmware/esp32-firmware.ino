@@ -208,6 +208,8 @@ void callBackendMonitor(const char* action);
 void firebasePushEvent(const char* eventType, const char* driver);
 void firebaseSetStatus(const char* state, const char* driver);
 void firebaseSetLocation(float lat, float lng);
+void firebaseSetPending(const char* driver, const char* rfid);
+void firebaseClearPending();
 void cancelPendingVerification(const char* reason);
 void updatePendingDisplay();
 
@@ -759,6 +761,9 @@ void cancelPendingVerification(const char* reason) {
   Serial.print("[Pending] Cancelled: ");
   Serial.println(reason);
 
+  // Clear Firebase /pending node
+  firebaseClearPending();
+
   displayMessage("VERIFICATION", String(reason), "Tap RFID to retry");
   delay(1500);
   displayMessage("SYSTEM READY", "Tap RFID Card", "Waiting...");
@@ -908,9 +913,12 @@ void checkRFID() {
   Serial.print("[Pending] RFID UID: ");
   Serial.println(uid);
 
-  // Blink LED to show pending state
-  digitalWrite(RED_LED, HIGH);
-  digitalWrite(GREEN_LED, HIGH);
+  // Keep both LEDs OFF during verification pending; GREEN will turn ON in startDriver() after face is verified
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+
+  // Push pending state to Firebase so the website auto-pops the verify modal
+  firebaseSetPending(selectedDriver->name.c_str(), uid.c_str());
 
   updatePendingDisplay();
 
@@ -1050,6 +1058,9 @@ void handleVerifyRoute() {
   Driver* verifiedDriver = pendingDriver;
   pendingDriver = nullptr;
 
+  // Clear Firebase /pending node
+  firebaseClearPending();
+
   // Check break bonus before starting
   if (verifiedDriver->hasExited) {
     checkBreakBonus(verifiedDriver);
@@ -1071,6 +1082,9 @@ void handleDrowsyRoute() {
     firebaseSetStatus("pre-alert", activeDriver->name.c_str());
   }
 
+  // RED LED ON for drowsiness alert
+  digitalWrite(RED_LED, HIGH);
+
   // Flash warning on OLED
   for (int i = 0; i < 3; i++) {
     display.clearDisplay();
@@ -1091,6 +1105,9 @@ void handleDrowsyRoute() {
     digitalWrite(BUZZER_PIN, LOW);
     delay(100);
   }
+
+  // RED LED OFF after drowsy alert
+  digitalWrite(RED_LED, LOW);
 
   // Return to normal display
   if (sessionRunning) {
@@ -1170,6 +1187,31 @@ void firebasePushEvent(const char* eventType, const char* driver) {
     Serial.printf("[Firebase] pushEvent ERROR: %s\n", fbdo.errorReason().c_str());
   } else {
     Serial.printf("[Firebase] event: %s by %s\n", eventType, driver);
+  }
+}
+
+void firebaseSetPending(const char* driver, const char* rfid) {
+  if (!firebaseReady) return;
+
+  FirebaseJson json;
+  json.set("driver", driver);
+  json.set("rfid",   rfid);
+  json.set("time",   (double)currentEpochMs());
+
+  if (!Firebase.RTDB.setJSON(&fbdo, "/pending", &json)) {
+    Serial.printf("[Firebase] setPending ERROR: %s\n", fbdo.errorReason().c_str());
+  } else {
+    Serial.printf("[Firebase] pending -> %s / %s\n", driver, rfid);
+  }
+}
+
+void firebaseClearPending() {
+  if (!firebaseReady) return;
+
+  if (!Firebase.RTDB.deleteNode(&fbdo, "/pending")) {
+    Serial.printf("[Firebase] clearPending ERROR: %s\n", fbdo.errorReason().c_str());
+  } else {
+    Serial.println("[Firebase] pending cleared");
   }
 }
 
@@ -1340,7 +1382,6 @@ void loop() {
     // Check for timeout
     if (millis() - pendingStartTime >= PENDING_TIMEOUT) {
       cancelPendingVerification("TIMEOUT");
-      digitalWrite(RED_LED, LOW);
       digitalWrite(GREEN_LED, LOW);
     } else {
       // Update the countdown display every 500ms
