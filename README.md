@@ -33,6 +33,48 @@ Drowsy driving contributes to over **20% of commercial transport collisions glob
 
 ---
 
+## 📸 Live Demonstration & Hardware Prototype Showcase
+
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/live_fatigue_hud.jpg" alt="Computer Vision Fatigue HUD in Action" width="100%" />
+      <br />
+      <b>🧠 Live Computer Vision HUD: Micro-Sleep Detection & Critical Alert</b>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/hardware_prototype.jpg" alt="DriverSentinel Hardware Unit Prototype" width="100%" />
+      <br />
+      <b>⚡ Custom ESP32 Cab Controller: OLED, RFID, GPS, Buzzer & Battery Management</b>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/images/fleet_dashboard.png" alt="DriveSafe Real-Time Fleet Dashboard" width="100%" />
+      <br />
+      <b>🛰️ DriveSafe Central Command Dashboard: Live GPS Map Tracking, SOS State & Event Auditing</b>
+    </td>
+  </tr>
+</table>
+
+### 🔍 System In-Action Highlights:
+1. **Live Computer Vision Fatigue HUD**:
+   - Real-time facial landmark mesh tracking eyes and lips.
+   - Dynamic thresholding: **EAR: 0.21 / 0.28 (Closed)**, **MAR: 0.03 / 0.59**, **Head Pitch: 170.3°**, **PERCLOS: 19.4%**, **Reliability: 84%**.
+   - Immediate **`FATIGUE CRITICAL — ALERTING CAB`** banner overlay triggering the in-cabin alarm buzzer.
+2. **Physical IoT Cab Controller Prototype**:
+   - Custom standalone modular embedded board powered by rechargeable 18650 lithium-ion cell with independent power gating switch.
+   - **SSD1306 128x64 OLED display** presenting real-time speed, authorization status, and countdowns.
+   - **MFRC522 High-Frequency RFID reader** with encrypted UID authentication.
+   - **GY-GPS6MV2 / NEO-6M satellite telemetry receiver** for live coordinate broadcasting.
+   - **Dual audio-visual warning system**: 85dB active buzzer + high-luminosity safety LED.
+3. **DriveSafe Central Fleet Dashboard**:
+   - Instantaneous status alerting (`EXCEEDED / SOS` threshold state).
+   - High-precision live map geolocation pin located in Nagpur (`21.0951° N, 78.9775° E`).
+   - Chronological event timeline recording millisecond-accurate micro-sleep and head nodding incidents.
+
+---
+
 ## 🏆 Key Features & Innovations
 
 - 🪪 **Multi-Factor Driver Verification (MFA)**: Vehicle ignition remains locked until an authorized RFID card is tapped **and** the driver's live facial biometrics pass recognition against enrolled fleet records.
