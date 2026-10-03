@@ -287,6 +287,19 @@ def verify_prepare():
     return jsonify({"camera_released": True, "monitor_was_running": was_running}), 200
 
 
+@app.route("/esp32/register", methods=["POST", "GET"])
+def esp32_register():
+    """Register ESP32 device IP address automatically when it boots and connects to WiFi."""
+    global ESP32_IP
+    ip = request.args.get("ip") or (request.is_json and request.json.get("ip")) or request.remote_addr
+    if ip:
+        ESP32_IP = ip
+        monitor._esp32_ip = ip
+        logger.info("ESP32 registered with IP: %s", ip)
+        return jsonify({"registered": True, "esp32_ip": ip}), 200
+    return jsonify({"error": "No IP provided"}), 400
+
+
 @app.route("/video_feed")
 def video_feed():
     """Stream live camera feed with real-time multi-factor fatigue HUD."""
