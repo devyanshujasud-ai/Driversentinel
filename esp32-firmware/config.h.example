@@ -1,0 +1,30 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// config.h.example — Template configuration for DriveSafe ESP32 firmware
+//
+// INSTRUCTIONS:
+// 1. Copy this file to config.h:
+//      cp esp32-firmware/config.h.example esp32-firmware/config.h
+// 2. Replace the placeholder values below with your real credentials.
+// 3. Keep config.h git-ignored so secrets are never pushed to GitHub.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ── WiFi ─────────────────────────────────────────────────────────────────────
+#define WIFI_SSID     "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+
+// ── Vision Backend (Python Flask) ────────────────────────────────────────────
+// IP of the PC running the Flask backend on your local network
+#define BACKEND_URL   "http://192.168.1.100:5000"
+
+// ── Firebase Realtime Database ───────────────────────────────────────────────
+#define FIREBASE_API_KEY    "YOUR_FIREBASE_API_KEY"
+#define FIREBASE_DB_URL     "https://your-project-default-rtdb.firebaseio.com/"
+#define FIREBASE_PROJECT_ID "your-project-id"
+
+// ── Firebase Database Secret (legacy auth for RTDB writes) ───────────────────
+#define FIREBASE_DB_SECRET  "YOUR_FIREBASE_DB_SECRET"
+
+#endif // CONFIG_H
