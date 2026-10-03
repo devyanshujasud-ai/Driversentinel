@@ -1,0 +1,11 @@
+{
+  "name": "anjuman-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix drivesafe run dev",
+    "build": "npm --prefix drivesafe run build",
+    "preview": "npm --prefix drivesafe run preview",
+    "backend": "python vision-backend/app.py"
+  }
+}
