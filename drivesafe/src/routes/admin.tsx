@@ -203,7 +203,7 @@ function AdminPage() {
               <tr key={`${d.rfid}-${i}`} className="animate-fade-up border-t border-border/70">
                 <td className="px-5 py-3">{d.name ?? "—"}</td>
                 <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{d.rfid ?? "—"}</td>
-                <td className="px-5 py-3 text-muted-foreground">
+                <td className="px-5 py-3 text-muted-foreground" suppressHydrationWarning>
                   {d.enrolledAt ? new Date(d.enrolledAt).toLocaleString() : "—"}
                 </td>
               </tr>

@@ -124,11 +124,6 @@ export function FaceVerifyModal() {
         // Mark state as success
         setState({ kind: "success", name, rfid, esp32Unlocked, esp32Error });
 
-        // Start drowsiness detection model on backend
-        fetch(`${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/monitor/start`, {
-          method: "POST",
-        }).catch((err) => console.warn("[Monitor] Auto-start monitor:", err));
-
         // Fetch browser device GPS location and sync to Firebase map
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
@@ -148,11 +143,13 @@ export function FaceVerifyModal() {
           );
         }
       } else {
-        setState({ kind: "failure", message: "NOT VERIFIED" });
+        const errMsg = (res && res["error"]) ? String(res["error"]) : "NOT VERIFIED";
+        setState({ kind: "failure", message: errMsg });
       }
     } catch (err) {
       console.error("[FaceVerifyModal] Verification failed:", err);
-      setState({ kind: "failure", message: "NOT VERIFIED" });
+      const errMsg = err instanceof Error ? err.message : "NOT VERIFIED";
+      setState({ kind: "failure", message: errMsg });
     }
   }, []);
 
@@ -334,8 +331,8 @@ export function FaceVerifyModal() {
                 <p className="mt-4 text-xl font-bold tracking-tight text-danger uppercase">
                   NOT VERIFIED
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Face does not match RFID card owner or enrollment database.
+                <p className="mt-2 text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                  {state.message || "Face does not match RFID card owner or enrollment database."}
                 </p>
                 <button
                   onClick={handleRetry}

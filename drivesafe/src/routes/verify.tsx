@@ -65,9 +65,6 @@ function VerifyPage() {
       const esp32Error = String(res["esp32_error"] ?? "");
       if (verified) {
         void clearFirebasePending();
-        fetch(`${import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"}/monitor/start`, {
-          method: "POST",
-        }).catch(() => {});
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition((pos) => {
             void syncDeviceLocationToFirebase(pos.coords.latitude, pos.coords.longitude);

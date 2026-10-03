@@ -15,6 +15,9 @@ import {
   CircleDot,
   Gauge,
   BrainCircuit,
+  Play,
+  Square,
+  Video,
 } from "lucide-react";
 import { useFirebaseValue } from "@/lib/firebase";
 import { firebaseConfigured, BACKEND_URL } from "@/lib/env";
@@ -141,10 +144,29 @@ function Dashboard() {
   const statusKey: StatusKey = normalizeStatus(status.state ?? status.status);
   const sessionTime = useSessionTime(status.sessionStart);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [detectorLoading, setDetectorLoading] = useState(false);
+  const [showCameraFeed, setShowCameraFeed] = useState(false);
 
   // Poll fatigue telemetry from backend
   const backendHost = BACKEND_URL || "http://localhost:5000";
   const [fatigue, setFatigue] = useState<FatigueTelemetry | null>(null);
+
+  const handleToggleDetector = async () => {
+    setDetectorLoading(true);
+    try {
+      if (fatigue?.running) {
+        await fetch(`${backendHost}/monitor/stop`, { method: "POST" });
+        setShowCameraFeed(false);
+      } else {
+        await fetch(`${backendHost}/monitor/start`, { method: "POST" });
+        setShowCameraFeed(true);
+      }
+    } catch (err) {
+      console.error("Failed to toggle detector:", err);
+    } finally {
+      setDetectorLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -239,18 +261,49 @@ function Dashboard() {
         </StatCard>
       </div>
 
-      {/* Live Fatigue Telemetry Panel */}
-      {fatigue && fatigue.running && (
+      {/* Live Fatigue Telemetry Panel & Control */}
+      {fatigue && fatigue.running ? (
         <section className="panel mt-5 overflow-hidden animate-fade-up">
-          <header className="flex items-center justify-between border-b border-border px-5 py-3.5">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
             <div className="flex items-center gap-2">
               <span className="flex size-2 animate-pulse rounded-full bg-emerald-400" />
-              <h2 className="text-xs font-semibold tracking-[0.18em] uppercase text-muted-foreground">
-                Live Fatigue Telemetry
+              <h2 className="text-xs font-semibold tracking-[0.18em] uppercase text-foreground">
+                Live Fatigue Telemetry & AI Model
               </h2>
             </div>
-            <FatigueAlertBadge state={fatigue.alert_state} />
+            <div className="flex items-center gap-2">
+              <FatigueAlertBadge state={fatigue.alert_state} />
+              <button
+                type="button"
+                onClick={() => setShowCameraFeed((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-3 py-1 text-xs font-medium hover:bg-secondary"
+              >
+                <Video className="size-3.5" />
+                {showCameraFeed ? "Hide Camera" : "View Camera HUD"}
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleDetector}
+                disabled={detectorLoading}
+                className="inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/15 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/25"
+              >
+                <Square className="size-3 fill-current" />
+                Stop Detection
+              </button>
+            </div>
           </header>
+
+          {/* Optional Live Camera Feed */}
+          {showCameraFeed && (
+            <div className="relative aspect-video w-full overflow-hidden border-b border-border bg-black">
+              <img
+                src={`${backendHost}/video_feed?t=${Date.now()}`}
+                alt="Live Fatigue Monitor Stream"
+                className="size-full object-contain"
+              />
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3 lg:grid-cols-6">
             <MetricCell
               icon={Gauge}
@@ -296,6 +349,29 @@ function Dashboard() {
               alert={fatigue.reliability_score < 60}
             />
           </div>
+        </section>
+      ) : (
+        <section className="panel mt-5 overflow-hidden p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+          <div>
+            <div className="flex items-center gap-2">
+              <BrainCircuit className="size-4 text-primary" />
+              <h2 className="text-sm font-semibold tracking-wide uppercase">
+                Vision Fatigue Detection Standby
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              RFID & Identity verified. Click to start real-time computer vision drowsiness and micro-sleep monitoring.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleDetector}
+            disabled={detectorLoading}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-xs font-semibold text-primary-foreground shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <Play className="size-3.5 fill-current" />
+            {detectorLoading ? "Starting..." : "Start Fatigue Detection"}
+          </button>
         </section>
       )}
 

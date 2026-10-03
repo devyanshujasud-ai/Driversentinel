@@ -32,6 +32,10 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
 from fatigue_detector import FatigueMonitor
+from serial_bridge import serial_bridge
+
+# Start USB Serial background listener for ESP32 COM port
+serial_bridge.start()
 
 # ── configuration ────────────────────────────────────────────────────────────
 load_dotenv()
@@ -66,7 +70,7 @@ def _load_faces() -> list[dict]:
 def _save_faces(faces: list[dict]) -> None:
     """Persist the enrolled-faces database to disk."""
     with open(FACES_PKL, "wb") as fh:
-        pickle.dump(faces, fh)
+        pickle.dump(faces, fh) 
 
 
 # ── fatigue monitor singleton ────────────────────────────────────────────────
@@ -130,8 +134,8 @@ def verify():
     best_idx = int(np.argmin(distances))
     best_distance = distances[best_idx]
 
-    # face_recognition default tolerance is 0.6
-    if best_distance <= 0.6:
+    # face_recognition tolerance (0.65 allows typical webcam lighting variations)
+    if best_distance <= 0.65:
         matched_face = faces[best_idx]
         matched_name = matched_face["name"]
         matched_rfid = matched_face.get("rfid", "")
@@ -140,17 +144,30 @@ def verify():
         # ── Auto-POST to ESP32 in background so verify responds immediately ──
         import threading
         def notify_esp32_bg():
+            # 1. Direct USB Serial unlock
+            try:
+                serial_bridge.send_unlock()
+            except Exception as e:
+                logger.debug("Serial unlock failed: %s", e)
+
+            # 2. Network backup (try both /unlock and /verify endpoints on ESP32)
             try:
                 import requests as http_requests
-                esp32_url = f"http://{ESP32_IP}/verify"
                 payload = {"name": matched_name, "rfid": matched_rfid}
-                logger.info("Sending unlock to ESP32: %s → %s", esp32_url, payload)
-                resp = http_requests.post(
-                    esp32_url,
-                    json=payload,
-                    timeout=2.5,
-                )
-                logger.info("ESP32 response: %d → %s", resp.status_code, resp.text[:100])
+                for ep in ["/unlock", "/verify"]:
+                    try:
+                        esp32_url = f"http://{ESP32_IP}{ep}"
+                        logger.info("Sending unlock to ESP32: %s → %s", esp32_url, payload)
+                        resp = http_requests.post(
+                            esp32_url,
+                            json=payload,
+                            timeout=2.0,
+                        )
+                        if resp.status_code == 200:
+                            logger.info("ESP32 unlock OK via %s (HTTP %d)", ep, resp.status_code)
+                            break
+                    except Exception as ep_err:
+                        logger.debug("ESP32 endpoint %s failed: %s", ep, ep_err)
             except Exception as exc:
                 logger.warning("Could not reach ESP32 at %s: %s", ESP32_IP, exc)
 
@@ -164,8 +181,13 @@ def verify():
         }
         return jsonify(result), 200
     else:
-        logger.info("Verification failed (best distance %.3f)", best_distance)
-        return jsonify({"verified": False, "error": "No matching face found"}), 404
+        logger.info("Verification failed (best distance %.3f, closest: %s)", best_distance, known_names[best_idx])
+        return jsonify({
+            "verified": False,
+            "error": f"Face not recognized (Closest match: {known_names[best_idx]} with distance {best_distance:.2f}, limit: 0.65). Please enroll your face on Admin page.",
+            "closest": known_names[best_idx],
+            "distance": float(best_distance),
+        }), 404
 
 
 @app.route("/enroll", methods=["POST"])
@@ -300,15 +322,31 @@ def esp32_register():
     return jsonify({"error": "No IP provided"}), 400
 
 
+@app.route("/esp32/rfid", methods=["POST", "GET"])
+def esp32_rfid():
+    """Triggered directly by ESP32 via HTTP when RFID card is tapped."""
+    driver = request.args.get("driver") or (request.is_json and request.json.get("driver")) or "DRIVER 1"
+    rfid = request.args.get("rfid") or (request.is_json and request.json.get("rfid")) or "B33D0204"
+    logger.info("[ESP32] Direct RFID tap received from ESP32: %s (%s)", driver, rfid)
+    try:
+        import requests as http_requests
+        url = "https://driver-72b57-default-rtdb.asia-southeast1.firebasedatabase.app/pending.json"
+        http_requests.put(url, json={"driver": driver, "rfid": rfid, "time": int(time.time() * 1000)}, timeout=3)
+        logger.info("[ESP32] Synced to Firebase /pending: %s", driver)
+    except Exception as e:
+        logger.warning("[ESP32] Failed to sync /pending to Firebase: %s", e)
+    return jsonify({"status": "ok", "driver": driver, "rfid": rfid}), 200
+
+
 @app.route("/video_feed")
 def video_feed():
     """Stream live camera feed with real-time multi-factor fatigue HUD."""
     if not monitor.running:
-        monitor.start()
+        return Response("Fatigue monitor is currently offline. Start fatigue detection to view stream.", status=503)
 
     def generate():
         last_id = -1
-        while True:
+        while monitor.running:
             frame_bytes, fid = monitor.get_latest_frame_with_id()
             if frame_bytes is not None and fid != last_id:
                 last_id = fid
@@ -321,6 +359,22 @@ def video_feed():
     return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
+def to_native(obj):
+    if isinstance(obj, dict):
+        return {k: to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [to_native(i) for i in obj]
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 @app.route("/monitor/status", methods=["GET"])
 def monitor_status():
     """Get comprehensive real-time fatigue telemetry.
@@ -328,11 +382,28 @@ def monitor_status():
     Returns all detection metrics, adaptive thresholds, composite score,
     and reliability information for the dashboard.
     """
-    telemetry = monitor.get_telemetry()
-    telemetry["running"] = monitor.running
+    raw_telemetry = monitor.get_telemetry()
+    telemetry = to_native(raw_telemetry)
+    telemetry["running"] = bool(monitor.running)
     return jsonify(telemetry), 200
+
+
+@app.route("/pending", methods=["GET"])
+def get_pending_rfid():
+    """Get pending driver RFID scan from USB Serial."""
+    pending = serial_bridge.get_pending()
+    if pending:
+        return jsonify(pending), 200
+    return jsonify({"pending": False}), 200
+
+
+@app.route("/pending/clear", methods=["POST"])
+def clear_pending_rfid():
+    """Clear local pending driver RFID scan."""
+    serial_bridge.clear_pending()
+    return jsonify({"cleared": True}), 200
 
 
 # ── entry-point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

@@ -28,6 +28,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 #include "config.h"
 
@@ -110,6 +111,10 @@ DriverData driver2 = {
 };
 
 DriverData* currentDriver = nullptr;
+DriverData* pendingDriver = nullptr;
+bool waitingForFaceVerify = false;
+unsigned long faceVerifyStartTime = 0;
+#define FACE_VERIFY_TIMEOUT 60000UL
 
 // =====================================================
 // SYSTEM STATES
@@ -231,6 +236,8 @@ void setup() {
   server.on("/drowsy", HTTP_GET, handleDrowsy);
   server.on("/unlock", HTTP_POST, handleUnlock);
   server.on("/unlock", HTTP_GET, handleUnlock);
+  server.on("/verify", HTTP_POST, handleUnlock);
+  server.on("/verify", HTTP_GET, handleUnlock);
   server.on("/status", HTTP_GET, handleStatus);
   server.onNotFound(handleNotFound);
   server.begin();
@@ -249,7 +256,40 @@ void setup() {
 // MAIN LOOP
 // =====================================================
 void loop() {
-  // Handle incoming HTTP requests (e.g., /drowsy from Vision AI)
+  // ── Handle incoming USB Serial commands from Computer ───────────
+  if (Serial.available() > 0) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.indexOf("DROWSY") >= 0 || cmd.indexOf("ALERT") >= 0) {
+      if (currentDriver == nullptr || !currentDriver->driving) {
+        Serial.println("[USB-ALERT IGNORED] Drowsiness signal received but vehicle ignition is OFF / no driver active.");
+        Serial.println("ACK:DROWSY_IGNORED");
+      } else {
+        Serial.println("[USB-ALERT] DROWSINESS DETECTED BY COMPUTER VISION AI!");
+        drowsyAlertActive = true;
+        drowsyAlertStartTime = millis();
+        drowsyAlertReason = "MICRO-SLEEP ALERT";
+        digitalWrite(RED_LED, HIGH);
+        beep(4, 200);
+        showDrowsyScreen();
+        Serial.println("ACK:DROWSY");
+      }
+    } else if (cmd.indexOf("UNLOCK") >= 0) {
+      Serial.println("[USB-UNLOCK] BIOMETRIC FACE VERIFIED! UNLOCKING IGNITION.");
+      handleUnlock();
+      Serial.println("ACK:UNLOCKED");
+    }
+  }
+
+  // Timeout for pending face verification
+  if (waitingForFaceVerify && (millis() - faceVerifyStartTime >= FACE_VERIFY_TIMEOUT)) {
+    waitingForFaceVerify = false;
+    pendingDriver = nullptr;
+    Serial.println("[TIMEOUT] Face verification window expired. Please tap RFID again.");
+    showReadyScreen();
+  }
+
+  // Handle incoming HTTP requests if on WiFi
   server.handleClient();
 
   // SOS has highest priority
@@ -324,8 +364,8 @@ void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 12000) {
-    delay(350);
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+    delay(250);
     Serial.print(".");
   }
   Serial.println();
@@ -335,15 +375,15 @@ void connectWiFi() {
     String ipStr = WiFi.localIP().toString();
     Serial.printf("[WIFI] Connected! Assigned IP: %s\n", ipStr.c_str());
     showWiFiScreen("WIFI CONNECTED", ipStr.c_str());
-    delay(1200);
+    delay(800);
 
     // Register with backend automatically so Flask knows our IP
     registerWithBackend();
   } else {
     wifiConnected = false;
-    Serial.println("[WIFI] Warning: Connection timeout. Continuing in standalone offline mode.");
-    showWiFiScreen("WIFI TIMEOUT", "OFFLINE MODE");
-    delay(1000);
+    Serial.println("[SYSTEM] WiFi offline. Running directly in USB Serial COM Mode.");
+    showWiFiScreen("USB COM ACTIVE", "READY (115200)");
+    delay(800);
   }
 }
 
@@ -368,6 +408,12 @@ void registerWithBackend() {
 
 // Vision Backend calls POST /drowsy when eye closure / micro-sleep / yawn is detected
 void handleDrowsy() {
+  if (currentDriver == nullptr || !currentDriver->driving) {
+    Serial.println("[DROWSY IGNORED] Drowsiness signal received but vehicle ignition is OFF / no driver active.");
+    server.send(200, "application/json", "{\"status\":\"ignored\",\"reason\":\"not_driving\"}");
+    return;
+  }
+
   Serial.println("==========================================");
   Serial.println("[ALERT] DROWSINESS SIGNAL FROM VISION AI!");
   Serial.println("==========================================");
@@ -388,12 +434,18 @@ void handleDrowsy() {
   server.send(200, "application/json", "{\"status\":\"alert_acknowledged\",\"alert\":\"drowsy\"}");
 }
 
-// Web App calls POST /unlock when face biometric verification passes
+// Web App calls POST /unlock or /verify when face biometric verification passes
 void handleUnlock() {
   Serial.println("[UNLOCK] Biometric Face Verification Passed. Unlocking Ignition.");
-  digitalWrite(IGNITION_PIN, HIGH);
-  digitalWrite(RED_LED, LOW);
-  beep(2, 100);
+  waitingForFaceVerify = false;
+  if (pendingDriver != nullptr) {
+    startDriving(pendingDriver);
+    pendingDriver = nullptr;
+  } else if (currentDriver != nullptr && !currentDriver->driving) {
+    startDriving(currentDriver);
+  } else {
+    startDriving(&driver1);
+  }
   server.send(200, "application/json", "{\"status\":\"unlocked\",\"ignition\":true}");
 }
 
@@ -419,9 +471,12 @@ void handleNotFound() {
 void syncRFIDToFirebase(const char* driverName, const char* rfidHex) {
   if (WiFi.status() != WL_CONNECTED) return;
 
+  // 1. Direct Firebase RTDB via secure client
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   String url = String(FIREBASE_DB_URL) + "/pending.json";
-  http.begin(url);
+  http.begin(client, url);
   http.addHeader("Content-Type", "application/json");
 
   String payload = "{";
@@ -433,14 +488,24 @@ void syncRFIDToFirebase(const char* driverName, const char* rfidHex) {
   int httpCode = http.PUT(payload);
   Serial.printf("[FIREBASE] /pending sync -> HTTP %d\n", httpCode);
   http.end();
+
+  // 2. Local Vision Backend LAN direct call (fast & reliable)
+  HTTPClient bHttp;
+  String bUrl = String(BACKEND_URL) + "/esp32/rfid?driver=" + String(driverName) + "&rfid=" + String(rfidHex);
+  bHttp.begin(bUrl);
+  int bCode = bHttp.GET();
+  Serial.printf("[BACKEND] /esp32/rfid direct -> HTTP %d\n", bCode);
+  bHttp.end();
 }
 
 void syncEventToFirebase(const char* eventType, const char* driverName) {
   if (WiFi.status() != WL_CONNECTED) return;
 
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   String url = String(FIREBASE_DB_URL) + "/events.json";
-  http.begin(url);
+  http.begin(client, url);
   http.addHeader("Content-Type", "application/json");
 
   String payload = "{";
@@ -457,9 +522,11 @@ void syncEventToFirebase(const char* eventType, const char* driverName) {
 void syncVehicleStateToFirebase() {
   if (WiFi.status() != WL_CONNECTED) return;
 
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   String url = String(FIREBASE_DB_URL) + "/vehicle.json";
-  http.begin(url);
+  http.begin(client, url);
   http.addHeader("Content-Type", "application/json");
 
   String payload = "{";
@@ -873,11 +940,13 @@ void checkRFID() {
   bool driver2Found = compareUID(rfid.uid.uidByte, DRIVER2_UID);
 
   if (driver1Found) {
+    Serial.println("RFID:B33D0204:DRIVER 1");
     Serial.println("[RFID] Authorized Driver 1 Detected (B3:3D:02:04)");
     // Notify Firebase to trigger the web face-verification modal automatically
     syncRFIDToFirebase(driver1.name, driver1.rfidHex);
     handleDriverRFID(&driver1);
   } else if (driver2Found) {
+    Serial.println("RFID:CD3EC801:DRIVER 2");
     Serial.println("[RFID] Authorized Driver 2 Detected (CD:3E:C8:01)");
     syncRFIDToFirebase(driver2.name, driver2.rfidHex);
     handleDriverRFID(&driver2);
@@ -929,8 +998,28 @@ void handleDriverRFID(DriverData* driver) {
     return;
   }
 
-  // Normal Start Driving
-  startDriving(driver);
+  // Normal Start Driving: require Face Biometric Verification first
+  pendingDriver = driver;
+  waitingForFaceVerify = true;
+  faceVerifyStartTime = millis();
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(20, 2);
+  display.println("DRIVE SENTINEL");
+  display.drawLine(0, 13, 127, 13, SSD1306_WHITE);
+  display.setCursor(6, 18);
+  display.print("RFID: ");
+  display.println(driver->name);
+  display.setTextSize(1);
+  display.setCursor(6, 34);
+  display.println(">> VERIFY FACE <<");
+  display.setCursor(6, 48);
+  display.println("ON WEB DASHBOARD");
+  display.display();
+
+  beep(2, 80);
 }
 
 // =====================================================

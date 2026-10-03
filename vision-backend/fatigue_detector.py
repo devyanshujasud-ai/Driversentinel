@@ -209,7 +209,15 @@ def get_head_pose(landmarks: np.ndarray, frame_shape: tuple) -> tuple[float, flo
 
 
 def _notify_esp32(esp32_ip: str, event_type: str = "Drowsiness", driver_name: str = "Driver") -> None:
-    """Send a fatigue alert to the ESP32 and log to Firebase asynchronously."""
+    """Send a fatigue alert to the ESP32 via USB Serial AND WiFi/Firebase."""
+    # 1. Immediate USB Serial alert to COM port (sub-millisecond latency)
+    try:
+        from serial_bridge import serial_bridge
+        serial_bridge.send_drowsy_alert(event_type)
+    except Exception as ser_err:
+        logger.debug("Serial alert skipped: %s", ser_err)
+
+    # 2. Network / Firebase logging
     def _run():
         try:
             firebase_url = "https://driver-72b57-default-rtdb.asia-southeast1.firebasedatabase.app"
@@ -222,12 +230,13 @@ def _notify_esp32(esp32_ip: str, event_type: str = "Drowsiness", driver_name: st
         except Exception as fb_err:
             logger.debug("Firebase event log skipped: %s", fb_err)
 
-        url = f"http://{esp32_ip}/drowsy"
-        try:
-            resp = requests.post(url, timeout=5)
-            logger.info("ESP32 fatigue alert -> %s  (HTTP %s)", url, resp.status_code)
-        except requests.RequestException as exc:
-            logger.warning("ESP32 fatigue alert failed: %s", exc)
+        if esp32_ip:
+            url = f"http://{esp32_ip}/drowsy"
+            try:
+                resp = requests.post(url, timeout=2)
+                logger.info("ESP32 WiFi fatigue alert -> %s (HTTP %s)", url, resp.status_code)
+            except Exception:
+                pass
 
     threading.Thread(target=_run, daemon=True).start()
 
